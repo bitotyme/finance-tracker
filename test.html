@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Student Finance Planner</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+<style>
+body { margin:0; font-family:Arial,sans-serif; background:#f4f6f8; }
+.container { width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; }
+
+/* LOGIN */
+#login { width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#1e88e5; color:white; }
+#login input, #login button { width:250px; padding:10px; margin:8px; font-size:16px; }
+
+/* DASHBOARD */
+#dashboard { display:none; width:100%; height:100%; padding:20px; box-sizing:border-box; position:relative; }
+
+.top-bar { display:flex; justify-content:space-between; margin-bottom:10px; }
+.top-box { background:white; padding:15px; width:45%; border-radius:8px; font-size:18px; text-align:center; }
+
+.progress-container { background:#ddd; border-radius:20px; height:30px; margin-bottom:20px; position: relative; }
+.progress-fill { height:100%; width:0%; background:#22c55e; border-radius:20px; transition: width 0.4s; }
+.progress-label { position:absolute; top:0; left:50%; transform:translateX(-50%); height:100%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:#fff; }
+
+#goalMessage, #encourageMessage { 
+    position:absolute; top:10px; left:50%; transform:translateX(-50%); 
+    background:#ffd700; color:#000; padding:10px 20px; border-radius:10px; 
+    font-weight:bold; display:none; font-size:18px; z-index:10; 
+}
+
+.main { display:flex; height:calc(100% - 140px); }
+.left-panel { width:30%; padding:20px; background:white; border-radius:8px; margin-right:20px; }
+.left-panel input, .left-panel button { width:100%; padding:8px; margin-top:10px; }
+.graph-panel { width:70%; background:white; padding:20px; border-radius:8px; }
+</style>
+</head>
+
+<body>
+<div class="container">
+
+    <!-- LOGIN SCREEN -->
+    <div id="login">
+        <h1>Student Finance Planner</h1>
+        <input id="username" placeholder="Username">
+        <input id="password" type="password" placeholder="Password">
+        <button id="loginBtn">Login / Create Account</button>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard">
+        <div class="top-bar">
+            <div class="top-box" id="totalBox">Total Saved: $0</div>
+            <div class="top-box" id="goalBox">Savings Goal: $0</div>
+        </div>
+
+        <div class="progress-container">
+            <div class="progress-fill" id="progressBar"></div>
+            <div class="progress-label" id="progressLabel">0%</div>
+        </div>
+
+        <div id="goalMessage">Congratulations, you've reached your saving goal!</div>
+        <div id="encourageMessage"></div>
+
+        <div class="main">
+            <div class="left-panel">
+                <!-- Initial Setup -->
+                <div id="setupSection">
+                    <h3>Initial Setup (one time)</h3>
+                    <input id="initialTotal" type="number" placeholder="Starting Total Saved">
+                    <input id="goal" type="number" placeholder="Savings Goal">
+                    <button id="setInitialBtn">Set Values</button>
+                </div>
+
+                <!-- Reset button -->
+                <div id="resetSection" style="display:none; margin-bottom:20px;">
+                    <button id="resetBtn">Reset Goal / Total Saved</button>
+                </div>
+
+                <hr>
+
+                <!-- Daily Entry -->
+                <h3>Daily Entry</h3>
+                <input id="date" type="date">
+                <input id="dailyAmount" type="number" placeholder="Amount Saved Today">
+                <button id="addEntryBtn">Add Entry</button>
+            </div>
+
+            <div class="graph-panel">
+                <canvas id="chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+let user = null;
+let chart;
+let data = { total: 0, goal: 0, history: [] };
+let lastShownThreshold = 0; // tracks last message threshold
+let encourageTimeout = null;
+
+// Elements
+const usernameEl = document.getElementById("username");
+const passwordEl = document.getElementById("password");
+const loginBtn = document.getElementById("loginBtn");
+
+const loginDiv = document.getElementById("login");
+const dashboardDiv = document.getElementById("dashboard");
+
+const initialTotalEl = document.getElementById("initialTotal");
+const goalEl = document.getElementById("goal");
+const setInitialBtn = document.getElementById("setInitialBtn");
+
+const resetBtn = document.getElementById("resetBtn");
+const setupSection = document.getElementById("setupSection");
+const resetSection = document.getElementById("resetSection");
+
+const dateEl = document.getElementById("date");
+const dailyAmountEl = document.getElementById("dailyAmount");
+const addEntryBtn = document.getElementById("addEntryBtn");
+
+const totalBox = document.getElementById("totalBox");
+const goalBox = document.getElementById("goalBox");
+const progressBar = document.getElementById("progressBar");
+const progressLabel = document.getElementById("progressLabel");
+const goalMessage = document.getElementById("goalMessage");
+const encourageMessage = document.getElementById("encourageMessage");
+
+// Login
+loginBtn.addEventListener("click", () => {
+    const u = usernameEl.value.trim();
+    const p = passwordEl.value.trim();
+    if (!u || !p) return alert("Enter username and password");
+
+    user = u;
+    const saved = localStorage.getItem(user);
+    if (saved) data = JSON.parse(saved);
+
+    loginDiv.style.display = "none";
+    dashboardDiv.style.display = "block";
+
+    updateTop();
+    updateProgress();
+    loadChart();
+
+    dateEl.value = new Date().toISOString().split("T")[0];
+
+    if (data.goal === 0) {
+        setupSection.style.display = "block";
+        resetSection.style.display = "none";
+    } else {
+        setupSection.style.display = "none";
+        resetSection.style.display = "block";
+    }
+});
+
+// Set initial total & goal
+setInitialBtn.addEventListener("click", () => {
+    const initial = Number(initialTotalEl.value);
+    const goalVal = Number(goalEl.value);
+    if (initial < 0 || goalVal <= 0) return alert("Enter valid numbers");
+
+    data.total = initial;
+    data.goal = goalVal;
+
+    if (data.history.length === 0) {
+        data.history.push({ date: dateEl.value, total: data.total, added: data.total });
+    }
+
+    save();
+    updateTop();
+    updateProgress();
+    updateChart();
+
+    setupSection.style.display = "none";
+    resetSection.style.display = "block";
+
+    checkGoal();
+});
+
+// Reset goal/total
+resetBtn.addEventListener("click", () => {
+    data.goal = 0;
+    data.total = 0;
+    data.history = [];
+    lastShownThreshold = 0;
+    clearTimeout(encourageTimeout);
+    encourageMessage.style.display = "none";
+    goalMessage.style.display = "none";
+
+    save();
+    setupSection.style.display = "block";
+    resetSection.style.display = "none";
+
+    updateTop();
+    updateProgress();
+    updateChart();
+});
+
+// Add daily savings
+addEntryBtn.addEventListener("click", () => {
+    const amount = Number(dailyAmountEl.value);
+    const dateVal = dateEl.value;
+    if (!amount || !dateVal) return alert("Enter date and amount");
+
+    data.total += amount;
+
+    const existing = data.history.find(e => e.date === dateVal);
+    if (existing) {
+        existing.added += amount;
+        existing.total += amount;
+    } else {
+        data.history.push({ date: dateVal, total: data.total, added: amount });
+    }
+
+    data.history.sort((a,b) => new Date(a.date) - new Date(b.date));
+
+    save();
+    updateTop();
+    updateProgress();
+    updateChart();
+
+    checkGoal();
+});
+
+function updateTop() {
+    totalBox.innerText = `Total Saved: $${data.total}`;
+    goalBox.innerText = `Savings Goal: $${data.goal}`;
+}
+
+function updateProgress() {
+    const percent = data.goal ? Math.min((data.total / data.goal) * 100, 100) : 0;
+    progressBar.style.width = percent + "%";
+    progressLabel.innerText = Math.round(percent) + "%";
+    showEncouragement(percent);
+}
+
+function showEncouragement(percent) {
+    // Clear previous timeout to avoid overlap
+    clearTimeout(encourageTimeout);
+
+    let message = "";
+    let duration = 5000; // 5 sec default
+
+    // Determine highest threshold reached that hasn't been shown
+    let thresholds = [
+        { p:25, msg:"Great start!" },
+        { p:50, msg:"Halfway there!" },
+        { p:75, msg:"Almost there!" },
+        { p:100, msg:"Congratulations, you've reached your saving goal!" }
+    ];
+
+    let highestThreshold = thresholds.filter(t => percent >= t.p && t.p > lastShownThreshold).sort((a,b)=>b.p-a.p)[0];
+
+    if (highestThreshold) {
+        message = highestThreshold.msg;
+        lastShownThreshold = highestThreshold.p;
+
+        if (highestThreshold.p === 100) {
+            duration = null; // stay until reset
+            goalMessage.style.display = "block";
+        } else {
+            goalMessage.style.display = "none";
+        }
+
+        encourageMessage.innerText = message;
+        encourageMessage.style.display = "block";
+
+        if (duration) {
+            encourageTimeout = setTimeout(() => { encourageMessage.style.display = "none"; }, duration);
+        }
+    }
+}
+
+function checkGoal() {
+    if (data.goal > 0 && data.total >= data.goal) {
+        confetti({ particleCount: 150, spread: 70, origin: { y: 0 } });
+    }
+}
+
+function save() {
+    localStorage.setItem(user, JSON.stringify(data));
+}
+
+// Chart
+function loadChart() {
+    const ctx = document.getElementById("chart");
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: data.history.map(e => e.date),
+            datasets: [{
+                label: "Total Savings",
+                data: data.history.map(e => e.total),
+                borderWidth: 2,
+                fill:false
+            }]
+        },
+        options: {
+            responsive:true,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const day = data.history[context.dataIndex];
+                            return `Total: $${day.total} (Added: $${day.added})`;
+                        }
+                    }
+                },
+                legend: { display: true }
+            },
+            scales:{
+                y:{
+                    beginAtZero:true,
+                    suggestedMax: data.goal ? data.goal*1.1 : undefined
+                }
+            },
+            animation: { duration: 500 }
+        },
+        plugins: [{
+            id: 'goalLine',
+            afterDraw: chart => {
+                if (!data.goal) return;
+                const yScale = chart.scales.y;
+                const ctx = chart.ctx;
+                const y = yScale.getPixelForValue(data.goal);
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(chart.chartArea.left, y);
+                ctx.lineTo(chart.chartArea.right, y);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = data.total >= data.goal ? 'green' : 'red';
+                ctx.setLineDash([5,5]);
+                ctx.stroke();
+                ctx.fillStyle = data.total >= data.goal ? 'green' : 'red';
+                ctx.font = '12px Arial';
+                ctx.fillText(`Goal: $${data.goal}`, chart.chartArea.right - 70, y - 5);
+                ctx.restore();
+            }
+        }]
+    });
+}
+
+function updateChart() {
+    chart.data.labels = data.history.map(e => e.date);
+    chart.data.datasets[0].data = data.history.map(e => e.total);
+    chart.options.scales.y.suggestedMax = data.goal ? data.goal*1.1 : undefined;
+    chart.update();
+}
+</script>
+</body>
+</html>
+
+// <script src="script.js">
