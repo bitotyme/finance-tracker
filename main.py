@@ -1,11 +1,15 @@
-from datetime import datetime, timedelta
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
+import urllib.parse
+from datetime import datetime, timedelta
 import secrets
 import hashlib
 import smtplib
 from email.message import EmailMessage
 
-from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError
@@ -97,9 +101,12 @@ def send_reset_email(to_email: str, reset_link: str) -> None:
     smtp_pass = os.environ["SMTP_PASS"]
     from_email = os.environ["FROM_EMAIL"]
 
+    print("send_reset_email() called for:", to_email)
+    print("SMTP_HOST:", smtp_host, "SMTP_USER:", smtp_user, "FROM_EMAIL:", from_email)
+
     msg = EmailMessage()
-    msg["Subject"] = "Reset your password"
-    msg["From"] = from_email
+    msg["Subject"] = "Finance Tracker Password Reset"
+    msg["From"] = f"Finance Tracker <{from_email}>"
     msg["To"] = to_email
     msg.set_content(
         "You requested a password reset.\n\n"
@@ -112,6 +119,8 @@ def send_reset_email(to_email: str, reset_link: str) -> None:
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
+
+    print("Reset email sent (attempted).")
 
 # --------------------
 # Health / test routes
@@ -188,7 +197,6 @@ def token(
 @app.post("/forgot-password")
 def forgot_password(
     payload: ForgotPasswordRequest,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     email = payload.email.strip().lower()
@@ -196,7 +204,11 @@ def forgot_password(
     # Always return same message (prevents account enumeration)
     generic = {"message": "If that email exists, a reset link has been sent."}
 
+    print("Forgot password requested for:", email)
+
     user = db.query(User).filter(User.email == email).first()
+    print("User found:", bool(user))
+
     if not user:
         return generic
 
@@ -205,14 +217,19 @@ def forgot_password(
     user.reset_token_expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_MINUTES)
     db.commit()
 
-    reset_link = f"{FRONTEND_RESET_URL}?token={raw_token}"
-    background.add_task(send_reset_email, user.email, reset_link)
+    # Encode token safely into URL
+    reset_link = f"{FRONTEND_RESET_URL}?token={urllib.parse.quote(raw_token)}"
+    print("Reset link generated:", reset_link)
+
+    # Send synchronously so failures show up immediately
+    send_reset_email(user.email, reset_link)
 
     return generic
 
 @app.post("/reset-password")
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
-    token = payload.token.strip()
+    # Decode token coming back from URL
+    token = urllib.parse.unquote(payload.token.strip())
     new_password = payload.new_password.strip()
 
     if len(new_password) < 8:
