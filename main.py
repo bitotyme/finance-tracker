@@ -36,10 +36,8 @@ from auth import (
 
 app = FastAPI(title="Student Finance Planner API")
 
-# Create database tables
 Base.metadata.create_all(bind=engine)
 
-# CORS (dev only)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -50,9 +48,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --------------------
-# Database dependency
-# --------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -60,9 +55,6 @@ def get_db():
     finally:
         db.close()
 
-# --------------------
-# Auth dependencies
-# --------------------
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def get_current_user(
@@ -80,12 +72,10 @@ def get_current_user(
 
     return user
 
-# --------------------
-# Email + reset helpers
-# --------------------
+# ---- Email + reset helpers ----
 FRONTEND_RESET_URL = os.environ.get(
     "FRONTEND_RESET_URL",
-    "http://127.0.0.1:5500/reset-password.html"
+    "https://csci480project.netlify.app/reset-password.html"
 )
 RESET_TOKEN_MINUTES = int(os.environ.get("RESET_TOKEN_MINUTES", "15"))
 
@@ -93,10 +83,6 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 def send_reset_email(to_email: str, reset_link: str) -> None:
-    """
-    Uses SMTP settings from environment variables:
-      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL
-    """
     smtp_host = os.environ["SMTP_HOST"]
     smtp_port = int(os.environ["SMTP_PORT"])
     smtp_user = os.environ["SMTP_USER"]
@@ -122,11 +108,9 @@ def send_reset_email(to_email: str, reset_link: str) -> None:
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
 
-    print("Reset email sent (attempted).")
+    print("Reset email sent successfully.")
 
-# --------------------
-# Health / test routes
-# --------------------
+# ---- Health / test routes ----
 @app.get("/")
 def root():
     return {"message": "Finance Tracker API is running"}
@@ -135,9 +119,7 @@ def root():
 def health_check():
     return {"status": "ok"}
 
-# --------------------
-# Auth routes
-# --------------------
+# ---- Auth routes ----
 @app.post("/register")
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     username = payload.username.strip()
@@ -193,17 +175,13 @@ def token(
     token = create_access_token(subject=username)
     return TokenResponse(access_token=token)
 
-# --------------------
-# Forgot / Reset password routes
-# --------------------
+# ---- Forgot / Reset password routes ----
 @app.post("/forgot-password")
 def forgot_password(
     payload: ForgotPasswordRequest,
     db: Session = Depends(get_db),
 ):
     email = payload.email.strip().lower()
-
-    # Always return same message (prevents account enumeration)
     generic = {"message": "If that email exists, a reset link has been sent."}
 
     print("Forgot password requested for:", email)
@@ -219,18 +197,20 @@ def forgot_password(
     user.reset_token_expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_MINUTES)
     db.commit()
 
-    # Encode token safely into URL
     reset_link = f"{FRONTEND_RESET_URL}?token={urllib.parse.quote(raw_token)}"
     print("Reset link generated:", reset_link)
 
-    # Send synchronously so failures show up immediately
-    send_reset_email(user.email, reset_link)
+    try:
+        send_reset_email(user.email, reset_link)
+    except KeyError as e:
+        print(f"ERROR: Missing environment variable: {e}")
+    except Exception as e:
+        print(f"ERROR: Failed to send reset email: {e}")
 
     return generic
 
 @app.post("/reset-password")
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
-    # Decode token coming back from URL
     token = urllib.parse.unquote(payload.token.strip())
     new_password = payload.new_password.strip()
 
@@ -252,9 +232,7 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 
     return {"message": "Password updated successfully"}
 
-# --------------------
-# App routes
-# --------------------
+# ---- App routes ----
 @app.get("/me", response_model=MeResponse)
 def me(current_user: User = Depends(get_current_user)):
     goal_amount = None
