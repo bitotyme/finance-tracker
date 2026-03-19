@@ -84,7 +84,7 @@ def hash_token(token: str) -> str:
 
 def send_reset_email(to_email: str, reset_link: str) -> None:
     smtp_host = os.environ["SMTP_HOST"]
-    smtp_port = int(os.environ["SMTP_PORT"])
+    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
     smtp_user = os.environ["SMTP_USER"]
     smtp_pass = os.environ["SMTP_PASS"]
     from_email = os.environ["FROM_EMAIL"]
@@ -103,8 +103,7 @@ def send_reset_email(to_email: str, reset_link: str) -> None:
         "If you did not request this, you can ignore this email."
     )
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
+    with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
 
