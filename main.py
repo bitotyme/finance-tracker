@@ -3,11 +3,11 @@ load_dotenv()
 
 import os
 import urllib.parse
+import urllib.request
+import json
 from datetime import datetime, timedelta
 import secrets
 import hashlib
-import smtplib
-from email.message import EmailMessage
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,31 +83,38 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 def send_reset_email(to_email: str, reset_link: str) -> None:
-    smtp_host = os.environ["SMTP_HOST"]
-    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
-    smtp_user = os.environ["SMTP_USER"]
-    smtp_pass = os.environ["SMTP_PASS"]
+    api_key = os.environ["SMTP_PASS"]
     from_email = os.environ["FROM_EMAIL"]
 
     print("send_reset_email() called for:", to_email)
-    print("SMTP_HOST:", smtp_host, "SMTP_USER:", smtp_user, "FROM_EMAIL:", from_email)
 
-    msg = EmailMessage()
-    msg["Subject"] = "Finance Tracker Password Reset"
-    msg["From"] = f"Finance Tracker <{from_email}>"
-    msg["To"] = to_email
-    msg.set_content(
-        "You requested a password reset.\n\n"
-        f"Click this link to reset your password:\n{reset_link}\n\n"
-        f"This link expires in {RESET_TOKEN_MINUTES} minutes.\n"
-        "If you did not request this, you can ignore this email."
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": from_email},
+        "subject": "Finance Tracker Password Reset",
+        "content": [{
+            "type": "text/plain",
+            "value": (
+                f"You requested a password reset.\n\n"
+                f"Click this link to reset your password:\n{reset_link}\n\n"
+                f"This link expires in {RESET_TOKEN_MINUTES} minutes.\n"
+                "If you did not request this, you can ignore this email."
+            )
+        }]
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST"
     )
 
-    with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
-        server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
-
-    print("Reset email sent successfully.")
+    with urllib.request.urlopen(req) as resp:
+        print("Reset email sent successfully. Status:", resp.status)
 
 # ---- Health / test routes ----
 @app.get("/")
