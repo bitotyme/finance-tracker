@@ -42,7 +42,9 @@ Base.metadata.create_all(bind=engine)
 # CORS (dev only)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev only; later set to your front-end URL
+    allow_origins=[
+        "https://csci480project.netlify.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
